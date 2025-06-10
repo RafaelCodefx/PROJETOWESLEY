@@ -1,0 +1,81 @@
+# ----------------------------------------------- #
+# Arquivos e pastas comuns para projetos Node.js  #
+# ----------------------------------------------- #
+node_modules/
+*.log
+npm-debug.log*
+yarn-debug.log*
+.pnpm-store/
+.yarn/
+.cache/
+.eslintcache
+.prettierignore
+
+# ----------------------------------------------- #
+# Arquivos e pastas comuns para projetos Python   #
+# ----------------------------------------------- #
+__pycache__/
+*.pyc
+*.pyd
+*.so
+venv/
+.Python/
+.vscode/
+
+# ----------------------------------------------- #
+# Variáveis de ambiente e segredos                #
+# IMPORTANTE: Nunca envie credenciais para o Git!#
+# ----------------------------------------------- #
+.env
+*.env
+*.pem
+*.key
+*.crt
+*.json.sample # Se você tiver arquivos JSON com dados sensíveis
+*.yml.sample # Se você tiver arquivos YAML com dados sensíveis
+
+# ----------------------------------------------- #
+# Arquivos de IDEs e editores de código           #
+# ----------------------------------------------- #
+.vscode/
+.idea/
+*.iml
+*.ipr
+*.iws
+*.sublime-project
+*.sublime-workspace
+.DS_Store # macOS
+Thumbs.db # Windows
+desktop.ini # Windows
+
+# ----------------------------------------------- #
+# Arquivos de build e temporários                 #
+# ----------------------------------------------- #
+build/
+dist/
+tmp/
+*.tmp
+*.bak
+*.swp
+*~
+*.swo
+
+# ----------------------------------------------- #
+# Pastas específicas do seu projeto               #
+# ----------------------------------------------- #
+# 'backlog 1' parece ser um arquivo ou pasta de controle de backlog local.
+# Se for algo que não deve ser versionado, inclua:
+backlog 1
+
+# Pastas de sessão que podem ser geradas pelo WhatsApp ou outros serviços
+sessions/
+downloads/ 
+
+# Arquivos de áudio (se forem temporários ou grandes demais)
+# audios/
+# Se 'audios' contiver arquivos de áudio essenciais para o projeto
+# que DEVEM ser versionados, REMOVA a linha acima.
+# Se forem apenas temporários ou de cache, mantenha.
+
+# Pastas de ambiente virtual Python (AgenteLLM)
+AgenteLLM/env/ # Sua estrutura mostrou 'env' dentro de AgenteLLM

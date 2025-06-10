@@ -1,0 +1,8 @@
+// Mensagens mais bem formuladas e humanas.
+// Cadastrar Cliente no SaaS, e enviar boleto corretamente sem erro.
+// Obter o numero no cadastro SaaS através de 'From' que vem do index.
+
+
+// Tratar todas entradas com a LLM, sem erros para entender o usuario.
+// Conseguir integrar chat do painel ao /api/webhook.
+// Lógica de Reagendamento, e Cancelamento.
