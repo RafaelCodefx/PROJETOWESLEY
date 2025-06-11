@@ -1,4 +1,6 @@
 import re
+import requests
+
 
 from datetime import datetime, timedelta, timezone
 from fastapi import FastAPI, Header, HTTPException, Depends
@@ -373,7 +375,7 @@ def choose_slot_with_llm(
         pass
     return None
 
-def salvar_memoria(numero, mensagem, token, name=None, phone=None, idade=None, resumo=None):
+def salvar_memoria(numero, mensagem, token, name=None, phone=None, idade=None, resumo=None, ultimoagendamento=None):
     url = "http://localhost:3001/api/memoria"
     headers = {
         "Authorization": f"Bearer {token}",
@@ -391,6 +393,7 @@ def salvar_memoria(numero, mensagem, token, name=None, phone=None, idade=None, r
     if phone: payload["phone"] = phone
     if idade: payload["idade"] = idade
     if resumo: payload["resumoDasInteracoes"] = resumo
+    if ultimoagendamento: payload["ultimoagendamento"] = ultimoagendamento
 
     resp = requests.post(url, headers=headers, json=payload)
     return resp.json()
@@ -420,6 +423,7 @@ def save_memory_to_db(
     name: Optional[str] = None,
     phone: Optional[str] = None,
     idade: Optional[str] = None,
+    ultimoagendamento: Optional[str] = None,
     resumoDasInteracoes: Optional[str] = None
 ):
 
@@ -433,6 +437,7 @@ def save_memory_to_db(
         **({"name": name} if name else {}),
         **({"phone": phone} if phone else {}),
         **({"idade": idade} if idade else {}),
+        **({"ultimoagendamento": ultimoagendamento} if ultimoagendamento else {}),
         **({"resumoDasInteracoes": resumoDasInteracoes} if resumoDasInteracoes else {})
     }
 
@@ -655,6 +660,7 @@ import math
 
 def extract_date_e_periodo(user_message: str, openai_key: str) -> Optional[Dict[str, str]]:
     agora = datetime.now()
+    print(agora)
     ano_atual = agora.year
 
     prompt = f"""
@@ -669,6 +675,7 @@ Você deve considerar:
 - Se o período não for mencionado, retorne `null` para o campo `periodo`.
 
 Ano atual: {ano_atual}
+Agora: {agora}
 
 Exemplos:
 "tenho disponibilidade na próxima segunda à tarde" =>
@@ -706,6 +713,7 @@ Formato:
     except Exception:
         print(f"[ERRO] JSON inválido do LLM: {resposta}")
         return None
+
 
 def is_question(user_message: str) -> bool:
     """
@@ -763,6 +771,101 @@ def escolher_slot_com_llm(
         pass
     return None
 
+def buscar_evento_por_data(ultimo_agendamento, token_jwt):
+    url = "http://localhost:3001/api/google/listar-eventos2"
+    headers = {"Authorization": f"Bearer {token_jwt}"}
+    resp = requests.get(url, headers=headers)
+
+    if resp.status_code != 200:
+        print("Erro ao listar eventos")
+        return None
+
+    eventos = resp.json().get("eventos", [])
+    
+    # Convertendo data para ISO:
+    from dateutil.parser import parse
+    import datetime
+
+    try:
+        # Suponha que o formato seja "11/06 às 21:00"
+        partes = ultimo_agendamento.replace(" às ", " ").split()
+        dia, mes = map(int, partes[0].split("/"))
+        hora, minuto = map(int, partes[1].split(":"))
+        hoje = datetime.datetime.now()
+        ano = hoje.year
+        dt_obj = datetime.datetime(ano, mes, dia, hora, minuto, tzinfo=datetime.timezone(datetime.timedelta(hours=-3)))
+        iso_alvo = dt_obj.isoformat()
+    except Exception as e:
+        print("Erro ao converter data:", e)
+        return None
+
+    for evento in eventos:
+        inicio = evento.get("start", {}).get("dateTime")
+        if inicio and inicio.startswith(iso_alvo[:16]):  # compara até os minutos
+            return evento.get("id")
+
+    return None
+
+def liberar_evento_anterior(ultimo_agendamento: str, token_jwt: str) -> bool:
+    """
+    Busca o evento do último agendamento no Google Calendar e o altera para "Disponível".
+    Retorna True se conseguiu editar, False caso contrário.
+    """
+    headers = {"Authorization": f"Bearer {token_jwt}"}
+    
+    # 1. Buscar eventos com a rota /api/google/listar-eventos2
+    try:
+        eventos_resp = requests.get("http://localhost:3001/api/google/listar-eventos2", headers=headers)
+        eventos_resp.raise_for_status()
+        eventos = eventos_resp.json().get("eventos", [])
+    except Exception as e:
+        print("[ERRO] Falha ao listar eventos:", e)
+        return False
+
+    # 2. Converter 'ultimoagendamento' tipo "11/06 às 21:00" para datetime ISO
+    try:
+        partes = ultimo_agendamento.replace(" às ", " ").split()
+        dia, mes = map(int, partes[0].split("/"))
+        hora, minuto = map(int, partes[1].split(":"))
+        agora = datetime.now()
+        agendamento_dt = datetime(ano := agora.year, mes, dia, hora, minuto, tzinfo=timezone(timedelta(hours=-3)))
+        agendamento_iso = agendamento_dt.isoformat()
+    except Exception as e:
+        print("[ERRO] Conversão de data:", e)
+        return False
+
+    # 3. Procurar o evento correspondente pelo horário de início
+    evento_alvo = None
+    for ev in eventos:
+        inicio_ev = ev.get("start", {}).get("dateTime")
+        if inicio_ev and inicio_ev.startswith(agendamento_iso[:16]):  # compara até os minutos
+            evento_alvo = ev
+            break
+
+    if not evento_alvo:
+        print("[INFO] Nenhum evento encontrado com esse horário.")
+        return False
+
+    evento_id = evento_alvo.get("id")
+    fim_ev = evento_alvo.get("end", {}).get("dateTime")
+
+    # 4. Chamar rota PUT /api/google/editar-evento
+    payload = {
+        "id": evento_id,
+        "summary": "Disponível",
+        "start": { "dateTime": agendamento_iso },
+        "end":   { "dateTime": fim_ev },
+        "colorId": "10"  # opcional, cor de "disponível"
+    }
+
+    try:
+        editar_resp = requests.put("http://localhost:3001/api/google/editar-evento", json=payload, headers=headers)
+        editar_resp.raise_for_status()
+        print("[SUCESSO] Evento alterado para 'Disponível'.")
+        return True
+    except Exception as e:
+        print("[ERRO] Falha ao editar evento:", e)
+        return False
 
 def obter_e_formatar_horarios_futuros(
     date_iso: str,
@@ -820,6 +923,28 @@ def obter_e_formatar_horarios_futuros(
         texto = f"📅 Para {dia}/{mes} tenho os horários {frase} 😊 Qual deles você tem maior preferencia?"
 
     return selecionados, texto
+
+
+def consultar_resumo_por_nome(name, jwt_token):
+    url = f"http://localhost:3001/api/memoria/resumo-por-nome/{name.lower()}"
+    headers = {
+        "Authorization": f"Bearer {jwt_token}"
+    }
+
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("ok"):
+                return f"✅ Resumo de {nome_cliente}:\n{data['resumo']}"
+            else:
+                return f"⚠️ {data.get('msg')}"
+        elif response.status_code == 404:
+            return f"⚠️ Cliente '{nome_cliente}' não encontrado."
+        else:
+            return f"❌ Erro HTTP {response.status_code}: {response.text}"
+    except Exception as e:
+        return f"❌ Erro ao consultar resumo: {str(e)}"
 
 
 def gerar_resposta_natural(
@@ -904,6 +1029,7 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
  
     if estado_atual == COLETANDO_NOME:
         nome_informado = user_message.strip()
+        
         if is_question(nome_informado):
             texto_fluxo = "😊 Agora, para continuar a emissão do boleto, poderia me informar seu **nome completo**?"
             return {
@@ -914,14 +1040,33 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
                 "slots": []
             }
 
-        # Fluxo normal (sem dúvida)
         if len(nome_informado) < 3:
-            return {"response": "❌ Nome muito curto. Por favor, informe seu **nome completo**, por exemplo: \"João da Silva\".", "audio_path": None, "slots": []}
+            return {
+                "response": "❌ Nome muito curto. Por favor, informe seu **nome completo**, por exemplo: \"João da Silva\".",
+                "audio_path": None,
+                "slots": []
+            }
 
+        # 1. Atualiza na memória temporária
         dados_cliente_temp[numero_telefone] = {"name": nome_informado}
-        estado_por_usuario[numero_telefone] = COLETANDO_CPF
-        return {"response": "Ótimo, obrigado. Agora envie seu CPF ou CNPJ (somente números, sem pontos ou traços).", "audio_path": None, "slots": []}
+        
+        # 2. SALVA DIRETO NO BANCO
+        try:
+            requests.post(
+                "http://localhost:3001/api/memoria/atualizar-perfil",
+                json={"numero": numero_telefone, "name": nome_informado},
+                headers={"Authorization": f"Bearer {token_jwt}"}
+            )
+        except Exception as e:
+            print("[ERRO] ao salvar nome no MongoDB:", e)
 
+        # 3. Avança para o próximo estado
+        estado_por_usuario[numero_telefone] = COLETANDO_CPF
+        return {
+            "response": "Ótimo, obrigado. Agora envie seu CPF ou CNPJ (somente números, sem pontos ou traços).",
+            "audio_path": None,
+            "slots": []
+        }
 
 
 
@@ -1082,6 +1227,8 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
             if resp.status_code in (200, 201):
                 dia, mes = data_parte.split("-")[2], data_parte.split("-")[1]
                 texto = f"✅ Pronto, {cliente_nome}! Seu atendimento está marcado para {dia}/{mes} às {hora_parte} 😊"
+
+
                 # A partir daqui, continue com fluxo de cobrança (Asaas) ou dados faltantes.
             else:
                 texto = "😔 Ops, não consegui criar o compromisso. Tente novamente mais tarde."
@@ -1099,6 +1246,7 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
         return {"response": texto, "audio_path": None, "slots": []}
 
 
+    AGUARDANDO_CONFIRMACAO_AMANHA = "AGUARDANDO_CONFIRMACAO_AMANHA"
       # ─── Estado “AGUARDANDO_CONFIRMACAO_AMANHA” ───────────────────────────────────
     if estado_atual == "AGUARDANDO_CONFIRMACAO_AMANHA":
         texto = user_message.strip()
@@ -1117,14 +1265,13 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
                     headers={"Authorization": f"Bearer {token_jwt}"}, timeout=5
                 )
                 todos_slots = resp_api_data.status_code == 200 and resp_api_data.json().get("horarios", []) or []
+                if periodo_desejado:
+                    todos_slots = [
+                    h for h in todos_slots if horario_esta_no_periodo(h["inicio"], periodo_desejado)
+                ]
             except Exception as e:
                 print(f"[ERROR] Falha ao buscar horários de {data_desejada}: {e}")
                 todos_slots = []
-            
-            if periodo_desejado:
-                todos_slots = [
-                h for h in todos_slots if horario_esta_no_periodo(h["inicio"], periodo_desejado)
-                ]
 
             if not todos_slots:
                 resposta = f"😔 Não há horários disponíveis em {data_desejada}. "
@@ -1388,10 +1535,21 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
                 json=payload_edit,
                 headers={"Authorization": f"Bearer {token_jwt}"}
             )
-
+            ext = extract_name_and_phone_llm(user_message, openai_key)
             if resp.status_code == 200:
                 dia, mes = data_parte.split("-")[2], data_parte.split("-")[1]
-                texto = f"✅ Pronto, {cliente_nome}! Seu atendimento está marcado para {dia}/{mes} às {hora_parte} 😊"
+                texto = f"✅ Pronto, {cliente_nome}! Seu atendimento está marcado para {dia}/{mes} às {hora_parte} 😊"   
+                ultimoagendamento = f"{dia}/{mes} às {hora_parte}"
+                requests.post(
+                        "http://localhost:3001/api/memoria/atualizar-perfil",
+                        json={
+                        "numero": numero_telefone,
+                        "name": cliente_nome,
+                        "ultimoagendamento": ultimoagendamento
+                    },
+                    headers={"Authorization": f"Bearer {token_jwt}"}
+                )
+
 
                 # Em vez de chamar gerar-cobranca, checamos se já temos um customerId
                 if numero_telefone not in customerId_por_usuario:
@@ -1457,22 +1615,47 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
                     headers={"Authorization": f"Bearer {token_jwt}"}
                 )
                 print("resp_create: ", resp_create)
+                ext = extract_name_and_phone_llm(user_message, openai_key)
                 if resp_create.status_code == 200:
                     try:
                         dia, mes = data_parte.split("-")[2], data_parte.split("-")[1]
                         texto = f"✅ Pronto, {cliente_nome}! Seu atendimento está marcado para {dia}/{mes} às {hora_parte} 😊"
 
+
                         # Em vez de chamar gerar-cobranca, checamos se já temos um customerId
                         if numero_telefone not in customerId_por_usuario:
                             # Se ainda não temos customerId, iniciamos coleta de dados do Asaas
+                            ultimoagendamento = f"{dia}/{mes} às {hora_parte}"
+                            requests.post(
+                                    "http://localhost:3001/api/memoria/atualizar-perfil",
+                                    json={
+                                    "numero": numero_telefone,
+                                    "name": cliente_nome,
+                                    "ultimoagendamento": ultimoagendamento
+                                },
+                                headers={"Authorization": f"Bearer {token_jwt}"}
+                            )
+
                             estado_por_usuario[numero_telefone] = COLETANDO_NOME
+
+
                             return {
                                 "response": texto + "\n\nPara emitir o boleto, preciso cadastrar você no Asaas. Qual é o seu nome completo?",
                                 "audio_path": None,
                                 "slots": []
                             }
                         else:
-                            # Já temos customerId: geramos a cobrança de uma vez
+                            ultimoagendamento = f"{dia}/{mes} às {hora_parte}"
+                            requests.post(
+                                         "http://localhost:3001/api/memoria/atualizar-perfil",
+                                            json={
+                                                "numero": numero_telefone,
+                                                "name": cliente_nome,
+                                                "ultimoagendamento": ultimoagendamento
+                                            },
+                                            headers={"Authorization": f"Bearer {token_jwt}"}
+                                        )
+        # Já temos customerId: geramos a cobrança de uma vez
                             asaasToken = get_user_config(token_jwt).get("asaasKey")
                             link = gerar_cobranca_asaas_sandbox(
                                 customerId_por_usuario[numero_telefone], 300.0, asaasToken
@@ -1917,7 +2100,7 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
                 }]
             else:
                 lista_amig = " ou ".join(friendly)
-                texto = f"📅 Posso agendar em {lista_amig} naquela data. Qual funciona melhor?"
+                texto = f"📅 Posso agendar em {lista_amig}. Qual funciona melhor?"
                 estado_por_usuario[numero_telefone] = "AGUARDANDO_ESCOLHA_HORARIO_HUMANO"
                 cache_horarios_por_usuario[numero_telefone] = [
                     {"id": h["id"], "inicio": h["inicio"]} for h in selecionados
@@ -1983,18 +2166,128 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
         caminho_audio = None if contains_date_or_time(texto) else gerar_audio(texto, f"{numero_telefone}.mp3")
         return {"response": texto, "audio_path": caminho_audio, "slots": []}
 
+    # REAGENDAR_ = "REAGENDAR_"
 
-    # ─── 6) Intenção REAGENDAR ───────────────────────────────────────────────────────
-    elif intent == "REAGENDAR":
-        texto = "✏️ Entendi que você quer remarcar. Me informe a nova data/horário 😊"
-        
-        caminho_audio = None if contains_date_or_time(texto) else gerar_audio(texto, f"{numero_telefone}.mp3")
-        estado_por_usuario[numero_telefone] = "INICIAL" 
-        return {"response": texto, "audio_path": caminho_audio, "slots": []}
 
+    # if intent == "REAGENDAR":
+    #    estado_por_usuario[numero_telefone] = REAGENDAR_
+    #    texto = "✏️ Entendi que você quer remarcar. Me informe a nova data/horário 😊"
+    #    caminho_audio = gerar_audio(texto, f"{numero_telefone}.mp3")
+    #    return {"response": texto, "audio_path": caminho_audio, "slots": []}
+
+
+    # ETAPA 2 - Próxima interação: usuário envia a nova data
+    if intent == "REAGENDAR":
+        url = f"http://localhost:3001/api/memoria/{numero_telefone}"
+        headers = {"Authorization": f"Bearer {token_jwt}"}
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 200:
+            dados = response.json()
+            ultimo_agendamento = dados["profile"].get("ultimoagendamento")
+            print("ULTIMO AGENDAMENTO: ", ultimo_agendamento)
+            if not ultimo_agendamento:
+                texto = "Qual foi o seu último agendamento? 🕒"
+                caminho_audio = gerar_audio(texto, f"{numero_telefone}.mp3")
+                return {"response": texto, "audio_path": caminho_audio, "slots": []}
+
+            if ultimo_agendamento:
+                sucesso = liberar_evento_anterior(ultimo_agendamento, token_jwt)
+                if sucesso:
+                    texto = "Claro! Vamos remarcar, Qual nova data ou horário de sua preferencia? 😊📆"
+                    info = extract_date_e_periodo(user_message, openai_key)
+                    data_desejada = info["date"] if info else None
+                    periodo_desejado = info["periodo"] if info else None
+
+                    if data_desejada:
+                        try:
+                            resp_api = requests.get(
+                                f"http://localhost:3001/api/horarios-disponiveis?date={data_desejada}",
+                                headers={"Authorization": f"Bearer {token_jwt}"}, timeout=5
+                            )
+                            todos_horarios_req = (
+                                resp_api.status_code == 200 and resp_api.json().get("horarios", []) or []
+                            )
+                        except Exception as e:
+                            print(f"[ERROR] Falha ao buscar horários para {data_desejada}: {e}")
+                            todos_horarios_req = []
+
+                        futuros_req = [
+                            h for h in todos_horarios_req
+                            if datetime.fromisoformat(h["inicio"]).astimezone(timezone.utc) > agora_utc
+                        ]
+
+                        if periodo_desejado:
+                            futuros_req = [
+                                h for h in futuros_req if horario_esta_no_periodo(h["inicio"], periodo_desejado)
+                            ]
+
+                        selecionados = futuros_req[:3]
+
+                        if not selecionados:
+                            return {
+                                "response": f"😔 Não há horários disponíveis em {data_desejada}.",
+                                "audio_path": None,
+                                "slots": []
+                            }
+
+                        friendly = [
+                            f"{h['inicio'].split('T')[0].split('-')[2]}/{h['inicio'].split('T')[0].split('-')[1]} às {h['inicio'].split('T')[1][:5]}"
+                            for h in selecionados
+                        ]
+
+                        if len(friendly) == 1:
+                            texto = f"👍 Só tenho {friendly[0]} nessa data. Esse horário serve?"
+                            estado_por_usuario[numero_telefone] = "AGUARDANDO_CONFIRMACAO_UNICO_HORARIO"
+                            cache_horarios_por_usuario[numero_telefone] = [{
+                                "id": selecionados[0]["id"],
+                                "inicio": selecionados[0]["inicio"]
+                            }]
+                        else:
+                            lista_amig = " ou ".join(friendly)
+                            texto = f"📅 Posso agendar em {lista_amig}. Qual funciona melhor?"
+                            estado_por_usuario[numero_telefone] = "AGUARDANDO_ESCOLHA_HORARIO_HUMANO"
+                            cache_horarios_por_usuario[numero_telefone] = [
+                                {"id": h["id"], "inicio": h["inicio"]} for h in selecionados
+                            ]
+
+
+                else:
+                    texto = "Por algum motivo não consegui liberar o evento anterior."
+            
+            # Se chegou até aqui, você já tem o último agendamento
+            # Agora você pode trocar o evento na agenda e perguntar a nova data
+
+            texto = "Vamos remarcar. Qual nova data ou horário de sua preferencia? 😊📆"
+            caminho_audio = gerar_audio(texto, f"{numero_telefone}.mp3")
+            return {"response": texto, "audio_path": caminho_audio, "slots": []}
+
+        else:
+            texto = "⚠️ Ocorreu um erro ao buscar seu histórico. Tente novamente."
+            caminho_audio = gerar_audio(texto, f"{numero_telefone}.mp3")
+            return {"response": texto, "audio_path": caminho_audio, "slots": []}
+
+            
     # ─── 7) Intenção CANCELAR ────────────────────────────────────────────────────────
     elif intent == "CANCELAR":
-        texto = "🗑️ Tudo bem, vou cancelar seu compromisso. Tem algo mais que eu poderia ajudar?"
+        url = f"http://localhost:3001/api/memoria/{numero_telefone}"
+        headers = {"Authorization": f"Bearer {token_jwt}"}
+        response = requests.get(url, headers=headers)
+
+        if response.status_code == 200:
+            dados = response.json()
+            ultimo_agendamento = dados["profile"].get("ultimoagendamento")
+            print("ULTIMO AGENDAMENTO: ", ultimo_agendamento)
+            if not ultimo_agendamento:
+                texto = "Qual foi o seu último agendamento? 🕒"
+                caminho_audio = gerar_audio(texto, f"{numero_telefone}.mp3")
+                return {"response": texto, "audio_path": caminho_audio, "slots": []}
+
+            if ultimo_agendamento:
+                sucesso = liberar_evento_anterior(ultimo_agendamento, token_jwt)
+                if sucesso:
+                    texto = " Tudo bem, cancelei aqui seu compromisso. Tem algo mais que eu poderia ajudar? 💕😊"
+
         caminho_audio = None if contains_date_or_time(texto) else gerar_audio(texto, f"{numero_telefone}.mp3")
         estado_por_usuario[numero_telefone] = "INICIAL"
         return {"response": texto, "audio_path": caminho_audio, "slots": []}
@@ -2008,6 +2301,7 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
             texto_e = entry.content if hasattr(entry, "content") else ""
             historico_texto += f"[{quem}] {texto_e}\n"
 
+        agora = datetime.now()
         prompt_template = PromptTemplate(
             input_variables=["context", "chat_history", "question"],
             template=(
@@ -2016,6 +2310,7 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
                 "{chat_history}\n\n"
                 "Contexto relevante extraído (se houver):\n"
                 "{context}\n\n"
+                "Horário e dia atual: {agora}"
                 "A mensagem atual do cliente:\n"
                 "{question}\n\n"
                 "Responda de forma humana e natural 😊"
@@ -2292,6 +2587,52 @@ class TokenPayload_(BaseModel):
     token: str
 
 
+def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    try:
+        payload = jwt.decode(credentials.credentials, os.getenv("JWT_SECRET"), algorithms=["HS256"])
+        return payload
+    except Exception:
+        raise HTTPException(status_code=401, detail="Token inválido")
+
+
+@app.get("/chat/{user_id}")
+def gerar_resumo_por_nome(user_id: str, nome: str, current_user: dict = Depends(get_current_user)):
+    if not nome:
+        raise HTTPException(status_code=400, detail="Nome ausente")
+
+    doc = memoria.find_one({
+        "userId": ObjectId(user_id),
+        "profile.name": { "$regex": f"^{nome}$", "$options": "i" }
+    })
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    history = doc.get("history", [])
+    profile = doc.get("profile", {})
+    interacoes_user = [h["text"] for h in history if h["from"] == "user"]
+
+    resumo = f"Cliente {profile.get('name') or doc.get('numero')}"
+    if profile.get("idade"):
+        resumo += f", idade {profile['idade']}"
+    resumo += f", teve {len(interacoes_user)} interações."
+
+    if interacoes_user:
+        resumo += f" Demonstrou interesse em: {'; '.join(interacoes_user[-3:])}."
+
+    if profile.get("ultimoagendamento"):
+        resumo += f" Último agendamento registrado: {profile['ultimoagendamento']}."
+
+    resumo = resumo[:600]
+
+    # Atualiza o campo no banco
+    memoria.update_one(
+        {"_id": doc["_id"]},
+        {"$set": { "profile.resumoDasInteracoes": resumo }}
+    )
+
+    return { "ok": True, "resumo": resumo }
+
 @app.get("/api/user-id")
 def rota_user_id(info: tuple[str, str] = Depends(decode_token_completo)):
     numero, token_jwt = info
@@ -2329,8 +2670,6 @@ async def generate(
         name=ext.get("name"),
         phone=ext.get("phone")
     )
-
-
 
     # Chamar generate_response (que faz todo o fluxo de agendamento/estado)
     resposta = generate_response(numero_telefone, user_message, token_jwt)

@@ -185,7 +185,7 @@ useEffect(() => {
     if (!token) return;
     try {
       const res = await axios.get(
-        "http://localhost:3001/api/google/listar-eventos",
+        "http://localhost:3001/api/google/listar-eventos2",
         { headers: { Authorization: `Bearer ${token}` } }
       );
       setEventos(res.data.eventos || []);
@@ -197,6 +197,7 @@ useEffect(() => {
 
   listarEvento();
 }, [token]); 
+
 
 
   //console.log("numero do painel: ", numeroPainel)
@@ -351,7 +352,7 @@ useEffect(() => {
   
     try {
       const res = await axios.post(
-        "http://localhost:8000/api/webhook",
+        "http://localhost:8003/api/webhook",
         { question: input },                           
         {
           headers: {
@@ -363,17 +364,19 @@ useEffect(() => {
       const resposta = res.data.answer;
       setChat(prev => [...prev, { type: "bot", text: resposta }]);
     } catch (err) {
-      console.error(err);
+      console.error("Erro completo:", err);
+      console.error("Resposta do backend:", err?.response?.data || err.message);
+    
       setChat(prev => [
         ...prev,
         { type: "bot", text: "❌ Erro ao chamar o serviço. Tente novamente." }
       ]);
     }
-  
-    setInput("");
-    setLoading(false);
-  };
-  
+    setInput("")
+    setLoading(false)
+  }
+    
+
   
   const handleSaveEConectarGoogle = async (e) => {
     e.preventDefault();
@@ -1074,24 +1077,27 @@ useEffect(() => {
               fontSize: 18,
               fontWeight: 700,
               letterSpacing: 1
-            }}>Agendamentos para Hoje</h3>
+            }}>Minha Agenda - Top 10</h3>
           <ul style={{ listStyle: "none", padding: 0 }}>
             {eventos.length === 0 ? (
-              <li>Nenhum evento encontrado.</li>
+              <li style={{ color: "#ccc" }}>Nenhum evento encontrado.</li>
             ) : (
               eventos.map((ev, idx) => (
                 <li key={idx} style={{ marginBottom: 7, color: "#e0e6ed", fontSize: 15 }}>
                   <b>{ev.summary || "(Sem título)"}</b>{" "}
                   <span style={{ color: "#80d4ff" }}>•</span>{" "}
                   {ev.start?.dateTime
-                    ? new Date(ev.start.dateTime).toLocaleString()
+                    ? new Date(ev.start.dateTime).toLocaleString("pt-BR", {
+                        timeZone: "America/Sao_Paulo",
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        day: "2-digit",
+                        month: "2-digit"
+                      })
                     : ev.start?.date || ""}
                 </li>
               ))
             )}
-            <a href="https://calendar.google.com/calendar/u/0/r">
-              <p style={{ color: "#6ee7b7", marginTop: 12 }}>Ver Mais</p>
-            </a>
           </ul>
           </section>
         </aside>

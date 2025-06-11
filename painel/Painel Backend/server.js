@@ -101,11 +101,12 @@ const MemoriaSchema = new mongoose.Schema(
       }
     ],
     profile: {
-      name:  { type: String, default: null },
+      name: { type: String, default: null },
       phone: { type: String, default: null },
-      idade: {type: String, default: null},
-      resumoDasInteracoes: {type: String, default: null}
-    }
+      idade: { type: String, default: null },
+      resumoDasInteracoes: { type: String, default: null },
+      ultimoagendamento: { type: String, default: null } //
+    }    
   },
   { timestamps: true }
 );
@@ -509,6 +510,102 @@ app.get('/api/google/listar-eventos', auth, async (req, res) => {
   } catch (err) {
     console.error('[Google Calendar] listar-eventos-hoje-atendimento:', err);
     return res.status(500).json({ ok: false, msg: 'Falha ao listar eventos de atendimento de hoje.' });
+  }
+});
+
+// GET /api/memoria/resumo-por-nome/:nome
+app.get("/api/memoria/resumo-por-nome/:nome", auth, async (req, res) => {
+  const nome = req.params.nome?.toLowerCase();
+  const userId = req.user.id;
+
+  try {
+    const doc = await Memoria.findOne({
+      userId,
+      "profile.name": { $regex: new RegExp(`^${nome}$`, "i") }
+    });
+
+    if (!doc) {
+      return res.status(404).json({ ok: false, msg: "Cliente não encontrado pelo nome." });
+    }
+
+    return res.json({
+      ok: true,
+      numero: doc.numero,
+      nome: doc.profile.name,
+      history: doc.history || []
+    });
+  } catch (err) {
+    console.error("[GET /api/memoria/resumo-por-nome/:nome]", err);
+    return res.status(500).json({ ok: false, msg: "Erro ao buscar resumo por nome." });
+  }
+});
+
+
+
+app.get("/api/memoria/resumo/:numero", auth, async (req, res) => {
+  const numero = req.params.numero;
+  const userId = req.user.id;
+
+  try {
+    const doc = await Memoria.findOne({ numero, userId });
+    if (!doc) {
+      return res.status(404).json({ ok: false, msg: "Memória não encontrada." });
+    }
+
+    const { history, profile } = doc;
+
+    // Resumo simples baseado em histórico
+    const interacoesUser = history.filter(h => h.from === "user").map(h => h.text);
+    const interacoesBot = history.filter(h => h.from === "bot").map(h => h.text);
+
+    let resumo = `Cliente ${profile.name || numero}`;
+    if (profile.idade) resumo += `, idade ${profile.idade}`;
+    resumo += `, teve ${interacoesUser.length} interações.`;
+
+    if (interacoesUser.length > 0) {
+      resumo += ` Demonstrou interesse em: ${interacoesUser.slice(-3).join("; ")}.`;
+    }
+
+    if (profile.ultimoagendamento) {
+      resumo += ` Último agendamento registrado: ${profile.ultimoagendamento}.`;
+    }
+
+    // Limita o resumo para não ficar muito extenso
+    resumo = resumo.slice(0, 600);
+
+    // Atualiza o campo
+    doc.profile.resumoDasInteracoes = resumo;
+    await doc.save();
+
+    return res.json({ ok: true, resumo });
+  } catch (err) {
+    console.error("[GET /api/memoria/resumo/:numero]", err);
+    return res.status(500).json({ ok: false, msg: "Erro ao gerar resumo." });
+  }
+});
+
+// Rota para listar todos os eventos de HOJE (independente do título)
+app.get('/api/google/eventos-hoje', auth, async (req, res) => {
+  try {
+    const oauth2Client = await getOAuthClientComToken(req.user.id);
+    const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
+
+    const now = new Date();
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59);
+
+    const response = await calendar.events.list({
+      calendarId: 'primary',
+      timeMin: startOfDay.toISOString(),
+      timeMax: endOfDay.toISOString(),
+      singleEvents: true,
+      orderBy: 'startTime',
+    });
+
+    return res.json({ eventos: response.data.items || [] });
+  } catch (err) {
+    console.error('[Google Calendar] eventos-hoje:', err);
+    return res.status(500).json({ ok: false, msg: 'Erro ao listar eventos de hoje.' });
   }
 });
 
@@ -951,7 +1048,7 @@ app.post('/api/vincular-token-numero', auth, async (req, res) => {
 });
 
 app.post("/api/memoria", auth, async (req, res) => {
-  const { numero, entry, name, phone, idade, resumoDasInteracoes } = req.body;
+  const { numero, entry, name, phone, idade, ultimoagendamento, resumoDasInteracoes } = req.body;
   const userId = req.user.id;
   console.log("Payload do JWT:", req.user)
 
@@ -989,7 +1086,11 @@ app.post("/api/memoria", auth, async (req, res) => {
     if (idade && !doc.profile.idade) {
       doc.profile.idade = xss(idade);
     }
-    if (resumoDasInteracoes && !doc.profile.resumoDasInteracoes) {
+    if (ultimoagendamento in req.body) {
+      doc.profile.ultimoagendamento = xss(ultimoagendamento);
+    }
+    
+    if (resumoDasInteracoes) { 
       doc.profile.resumoDasInteracoes = xss(resumoDasInteracoes);
     }
 
@@ -1001,12 +1102,46 @@ app.post("/api/memoria", auth, async (req, res) => {
     });
 
     await doc.save();
+    console.log("Salvo com sucesso:", doc.profile);
     return res.status(200).json({ ok: true });
   } catch (err) {
     console.error("[POST /api/memoria]", err);
     return res.status(500).json({ ok: false, msg: "Erro interno ao salvar memória" });
   }
 });
+
+
+app.post("/api/memoria/atualizar-perfil", auth, async (req, res) => {
+  const { numero, name, phone, idade, ultimoagendamento, resumoDasInteracoes } = req.body;
+  const userId = req.user.id;
+
+  if (!numero) {
+    return res.status(400).json({ ok: false, msg: "Número é obrigatório." });
+  }
+
+  try {
+    let doc = await Memoria.findOne({ numero, userId });
+
+    if (!doc) {
+      return res.status(404).json({ ok: false, msg: "Memória não encontrada." });
+    }
+
+    if (name) doc.profile.name = xss(name);
+    if (phone) doc.profile.phone = xss(phone);
+    if (idade) doc.profile.idade = xss(idade);
+    if ("ultimoagendamento" in req.body) doc.profile.ultimoagendamento = xss(ultimoagendamento);
+    if (resumoDasInteracoes) doc.profile.resumoDasInteracoes = xss(resumoDasInteracoes);
+    console.log("req.body recebido:", req.body);
+
+    await doc.save();
+    console.log("Perfil atualizado:", doc.profile);
+    return res.status(200).json({ ok: true, msg: "Perfil atualizado com sucesso" });
+  } catch (err) {
+    console.error("[POST /api/memoria/atualizar-perfil]", err);
+    return res.status(500).json({ ok: false, msg: "Erro ao atualizar perfil." });
+  }
+});
+
 
 // GET /api/memoria/:numero
 app.get("/api/memoria/:numero", auth, async (req, res) => {

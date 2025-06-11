@@ -2,7 +2,13 @@
 // Cadastrar Cliente no SaaS, e enviar boleto corretamente sem erro.
 // Obter o numero no cadastro SaaS através de 'From' que vem do index.
 
+// salvar nome completo no banco de dados na fase coletando nome, e obter para bot usar com split no primeiro nome apenas
+
 
 // Tratar todas entradas com a LLM, sem erros para entender o usuario.
 // Conseguir integrar chat do painel ao /api/webhook.
 // Lógica de Reagendamento, e Cancelamento.
+    - verificar ultimoagendamento do usuario, se nao tiver, vamos meter a lógica de pedir ao usuario o ultimoagendamento.
+    - Após obter ultimoagendamento, verificar na agenda e trocar evento para Disponivel.
+    - Perguntar Nova Data e fazer o novo agendamento.
+    - salvar no mongoose
