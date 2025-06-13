@@ -11,7 +11,6 @@ import requests
 import json
 import os
 
-from elevenlabs import ElevenLabs, save
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_loaders import CSVLoader
 from langchain_community.vectorstores import FAISS
@@ -69,7 +68,7 @@ dados_cliente_temp: Dict[str, Dict[str, str]] = {}
 
 
 load_dotenv()
-elevenlabs = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
+GOOGLE_TTS_API_KEY = os.getenv("GOOGLE_TTS_API_KEY")
 
 # ─── 1) Carregar base de conhecimento e vetorizar ──────────────────────────────
     # loader = CSVLoader(file_path=f"base_form{nome_admin}.csv"
@@ -226,24 +225,50 @@ def extract_cpf(user_message: str) -> Optional[str]:
         return texto_numeros
     return None
 
+import base64
+
+def remover_emojis(texto: str) -> str:
+    # Remove emojis e caracteres especiais fora do padrão Unicode básico
+    return re.sub(r'[\U00010000-\U0010ffff]', '', texto)
+
 # ─── 6) Geração de áudio com ElevenLabs ─────────────────────────────────────────
 def gerar_audio(texto: str, nome_arquivo: str = "resposta.mp3") -> Optional[str]:
     try:
-        audio = elevenlabs.text_to_speech.convert(
-            text=texto,
-            voice_id="yM93hbw8Qtvdma2wCnJG",
-            model_id="eleven_multilingual_v2",
-            output_format="mp3_44100_128",
-        )
+        texto_limpo = remover_emojis(texto)  # <--- remove emojis antes de enviar
+
+        url = f"https://texttospeech.googleapis.com/v1/text:synthesize?key={GOOGLE_TTS_API_KEY}"
+        payload = {
+            "input": {"text": texto_limpo},
+            "voice": {
+                "languageCode": "pt-BR",
+                "name": "pt-BR-Chirp3-HD-Sulafat"
+            },
+            "audioConfig": {
+                "audioEncoding": "MP3"
+            }
+        }
+        headers = {"Content-Type": "application/json"}
+
+        response = requests.post(url, json=payload, headers=headers)
+        response.raise_for_status()
+
+        audio_base64 = response.json()["audioContent"]
+        audio_bytes = base64.b64decode(audio_base64)
+
         AUDIO_DIR = "../Whats/audios"
         Path(AUDIO_DIR).mkdir(parents=True, exist_ok=True)
         caminho = os.path.join(AUDIO_DIR, nome_arquivo)
-        save(audio, caminho)
+
+        with open(caminho, "wb") as f:
+            f.write(audio_bytes)
+
         print(f"[AUDIO] Áudio gerado e salvo em: {caminho}")
         return f"audios/{nome_arquivo}"
+
     except Exception as e:
         print(f"[ERROR] Falha ao gerar áudio: {e}")
         return None
+
         # ─── 7) Detecta intenção via LLM ────────────────────────────────────────────────
 def detect_intent_llm(user_message: str, openai_key: str) -> str:
     prompt = (
@@ -308,7 +333,7 @@ def criar_cliente_asaas_sandbox(nome: str, cpfCnpj: str, mobilePhone: str, asaas
     Retorna o customerId (ex: "cus_abcdef1234") ou None se falhar.
     """
     # Endpoint de sandbox do Asaas:
-    url = "https://sandbox.asaas.com/api/v3/customers"
+    url = "https://www.asaas.com/api/v3/customers"
     payload = {
         "name": nome,
         "cpfCnpj": cpfCnpj,
@@ -342,7 +367,7 @@ def gerar_cobranca_asaas_sandbox(customerId: str, valor: float, asaasToken: str)
     Chama o endpoint do Asaas (sandbox) para gerar uma cobrança (boleto/Pix).
     Retorna o link de pagamento (bankSlipUrl ou pixUrl) ou None se falhar.
     """
-    url = "https://sandbox.asaas.com/api/v3/payments"
+    url = "https://www.asaas.com/api/v3/payments"
     payload = {
         "customer": customerId,
         "billingType": "BOLETO",    # ou "PIX"
