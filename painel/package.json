@@ -9,12 +9,17 @@
     "@testing-library/user-event": "^13.5.0",
     "axios": "^1.9.0",
     "bootstrap": "^5.3.6",
+    "framer-motion": "^12.17.3",
+    "jsonwebtoken": "^9.0.2",
     "jwt-decode": "^4.0.0",
+    "nodemailer": "^7.0.3",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
+    "react-icons": "^5.5.0",
     "react-router-dom": "^7.6.0",
     "react-scripts": "5.0.1",
-    "web-vitals": "^2.1.4"
+    "web-vitals": "^2.1.4",
+    "xss": "^1.0.15"
   },
   "scripts": {
     "start": "react-scripts start",

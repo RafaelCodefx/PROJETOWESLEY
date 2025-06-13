@@ -1,4 +1,4 @@
-// Mensagens mais bem formuladas e humanas.
+// Mensagens mais bem formuladas e humanas e femininas.
 // Cadastrar Cliente no SaaS, e enviar boleto corretamente sem erro.
 // Obter o numero no cadastro SaaS através de 'From' que vem do index.
 
@@ -12,3 +12,8 @@
     - Após obter ultimoagendamento, verificar na agenda e trocar evento para Disponivel.
     - Perguntar Nova Data e fazer o novo agendamento.
     - salvar no mongoose
+
+
+// Melhorar Frases com tom mais feminino com emojis femininos.
+// integrar AsaaS.
+// Melhorias no front end.

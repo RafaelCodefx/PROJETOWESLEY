@@ -97,7 +97,7 @@ function ensureClientForNumero(numeroPainel) {
     const senderFull = message.from; // ex: “5511999999999@c.us”
     if (senderFull === 'status@broadcast') return;
     const sender = senderFull.split('@')[0]; // ex: “5511999999999”
-    if (sender ==='556599994101' ||  sender === '556592382772'  || sender === '559984066965' || sender === '553184500320' || sender === '556584521369' || sender === '5511968797843'){
+    if (sender ==='556599990141' ||  sender === '556592382772'  || sender === '559984066965' || sender === '553184500320' || sender === '556584521369' || sender === '5511968797843' || sender === '556592040951'){
       console.log("Ignorando...")
       return;
     }

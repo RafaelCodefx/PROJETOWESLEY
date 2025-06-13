@@ -6,6 +6,8 @@ import logo from './assets/logo.jpeg';
 
 
 
+
+
 function decodeJwtPayload(token) {
   try {
     const [, payloadBase64] = token.split('.');
@@ -112,6 +114,7 @@ function Painel() {
   const navigate = useNavigate();
   const isMobile = useMobile();
   const chatRef = useRef(null);
+  
 
   const [input, setInput] = useState("");
   const [chat, setChat] = useState([]);
@@ -147,6 +150,45 @@ function Painel() {
 console.log("auth bruto:", auth);
 console.log("payload decodificado:", payload);
 console.log("numeroPainel:", numeroPainel);
+
+
+
+function formatar_e_salvar_base_conhecimento(file) {
+  const auth = JSON.parse(localStorage.getItem('auth') || '{}');
+  const token = auth?.token;
+
+  if (!token) {
+    alert("Token de autenticação não encontrado.");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("arquivo", file);
+
+  fetch("http://localhost:3001/api/formatarconh", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: formData
+  })
+    .then(res => res.json())
+    .then(data => {
+      if (data.ok) {
+        alert("✅ Base de conhecimento formatada e salva com sucesso!");
+        console.log("Arquivo salvo:", data.arquivo);
+      } else {
+        alert("❌ Falha ao salvar a base.");
+        console.error(data.msg);
+      }
+    })
+    .catch(err => {
+      console.error("Erro ao enviar o arquivo:", err);
+      alert("❌ Erro inesperado ao enviar.");
+    });
+}
+
+
 
 
 useEffect(() => {
@@ -410,6 +452,8 @@ useEffect(() => {
     setTimeout(() => setSavedMsg(""), 1600);
   };
 
+
+
   // ─── 6) Salvar configurações de Integrações ───────────────────────────────────
     const handleSave = async (e) => {
     e.preventDefault();
@@ -452,54 +496,175 @@ useEffect(() => {
       fontFamily: "Orbitron, Roboto Mono, sans-serif",
       width: "100vw"
     }}>
-  <header
+ <header
   style={{
     width: "100%",
-    background: "rgba(33,34,53,0.98)",
+    background: "linear-gradient(145deg, #1f2333, #252b3f)",
     color: "#fff",
-    borderBottom: "1px solid #2c2d45",
-    boxShadow: "0 4px 32px 0 rgba(26,40,80,0.11)",
-    padding: isMobile ? "14px 0 10px 0" : "26px 0 18px 0",
+    padding: isMobile ? "14px 1rem" : "26px 2rem",
     display: "flex",
-    flexDirection: "column",
+    flexDirection: isMobile ? "column" : "row",
     alignItems: "center",
-    gap: isMobile ? 8 : 14,
+    justifyContent: "space-between",
+    borderBottom: "1px solid #2e3147",
+    boxShadow: "0 4px 32px rgba(14, 22, 44, 0.25)",
     position: "sticky",
     top: 0,
-    zIndex: 200
+    zIndex: 200,
+    backdropFilter: "blur(8px)"
   }}
 >
-  <div style={{
-    display: "flex", alignItems: "center", gap: isMobile ? 11 : 22, marginBottom: 0
-  }}>
+  <div style={{ display: "flex", alignItems: "center", gap: isMobile ? 12 : 20 }}>
     <img
       src={logo}
       alt="Logo"
       style={{
-        width: isMobile ? 32 : 48,
-        height: isMobile ? 32 : 48,
-        borderRadius: "32%",
-        boxShadow: "0 1px 10px #1e293b3c"
+        width: isMobile ? 36 : 50,
+        height: isMobile ? 36 : 50,
+        borderRadius: "50%",
+        boxShadow: "0 4px 12px rgba(100, 255, 218, 0.3)",
+        transform: "scale(1.01)",
+        transition: "transform 0.3s ease-in-out"
       }}
+      onMouseEnter={e => (e.currentTarget.style.transform = "scale(1.07)")}
+      onMouseLeave={e => (e.currentTarget.style.transform = "scale(1.01)")}
     />
+
     <div>
       <span style={{
-        fontFamily: "Orbitron, monospace",
-        fontSize: isMobile ? 15 : 21,
-        fontWeight: 600,
-        color: "#6ee7b7",
-        letterSpacing: 1.4
+        fontFamily: "Orbitron, sans-serif",
+        fontSize: isMobile ? 16 : 22,
+        fontWeight: 700,
+        color: "#7df9ff", // cor que remete à IA, movimento e estímulo
+        letterSpacing: "1.2px",
+        textShadow: "0 0 6px rgba(125, 249, 255, 0.4)"
       }}>
-        Painel Eva IA
+        EVA • IA
       </span>
       <div style={{
-        fontSize: isMobile ? 13 : 15, color: "#e0e6ed"
+        fontSize: isMobile ? 13 : 15,
+        color: "#e2e8f0",
+        fontWeight: 400
       }}>
-        Olá, <b>{nomeUsuario}</b>
+        Olá, <b style={{ color: "#a0f0d0" }}>{nomeUsuario}</b> 👋
       </div>
     </div>
   </div>
+
+
+
+  <button
+    onClick={() => {
+      localStorage.removeItem("token");
+      window.location.href = "/";
+    }}
+    style={{
+      padding: "9px 40px",
+      borderRadius: "8px",
+      background: "linear-gradient(135deg, #7f5af0, #2cb67d)",
+      color: "#fff",
+      fontWeight: 600,
+      fontSize: "14px",
+      border: "none",
+      cursor: "pointer",
+      boxShadow: "0 2px 12px rgba(127, 90, 240, 0.3)",
+      transition: "all 0.3s ease-in-out"
+    }}
+    onMouseEnter={e => {
+      e.currentTarget.style.filter = "brightness(1.15)";
+    }}
+    onMouseLeave={e => {
+      e.currentTarget.style.filter = "brightness(1)";
+    }}
+  >
+    Sair
+  </button>
 </header>
+
+
+<div style={{
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  flexDirection:'column',
+  padding: "14px",
+  borderRadius: "12px",
+  backgroundColor: "transparent",
+  backdropFilter: "blur(4px)",
+
+  transition: "all 0.3s ease-in-out"
+}}>
+  <div style={{
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  gap: 8,
+  padding: "12px 18px",
+  border: "2px dashed #7df9ff55",
+  borderRadius: 16,
+  background: "linear-gradient(145deg, #1f2333, #252b3f)",
+  color: "#7df9ff",
+  width: "fit-content",
+  margin: "0 auto",
+  cursor: "pointer",
+  transition: "all 0.3s ease-in-out"
+}}
+  onMouseEnter={e => e.currentTarget.style.borderColor = "#2cb67d"}
+  onMouseLeave={e => e.currentTarget.style.borderColor = "#7df9ff55"}
+>
+  <input
+    id="upload-arquivo"
+    type="file"
+    accept=".txt"
+    style={{ display: "none" }}
+    onChange={e => {
+      if (e.target.files.length > 0) {
+        formatar_e_salvar_base_conhecimento(e.target.files[0]);
+      }
+    }}
+  />
+  
+  <label htmlFor="upload-arquivo" style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+    <svg
+      width="42"
+      height="42"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="#7df9ff"
+      strokeWidth="2.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{
+        transition: "transform 0.2s ease, stroke 0.2s ease",
+        filter: "drop-shadow(0 0 6px #7df9ff44)"
+      }}
+      onMouseEnter={e => {
+        e.currentTarget.style.transform = "scale(1.2)";
+        e.currentTarget.style.stroke = "#2cb67d";
+      }}
+      onMouseLeave={e => {
+        e.currentTarget.style.transform = "scale(1)";
+        e.currentTarget.style.stroke = "#7df9ff";
+      }}
+    >
+      <path d="M16 16l-4-4-4 4" />
+      <path d="M12 12v9" />
+      <path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 104 16.3" />
+    </svg>
+    <span style={{
+      marginTop: 6,
+      fontSize: 15,
+      color: "#e2e8f0",
+      fontWeight: 500,
+      textAlign: "center"
+    }}>
+      Fazer upload da base<br />de exemplos de conversas (.txt)
+    </span>
+  </label>
+</div>
+
+
+</div>
 
 
       {/* Status do Bot / Confirmação de número */}
@@ -562,6 +727,7 @@ useEffect(() => {
 
 
 
+
       {/* Botão para abrir QR Code enquanto não confirmado */}
       {whatsappNumero !== numeroPainel && (
         <div style={{ textAlign: "center", marginBottom: 16 }}>
@@ -578,6 +744,7 @@ useEffect(() => {
           boxShadow: "0 2px 8px #1b243840",
           transition: "background 0.2s, transform 0.1s"
         }}
+        onClick={() => setQrPopup(true)}  // <- ADICIONE ESTA LINHA
         onMouseOver={e => e.currentTarget.style.background = "linear-gradient(90deg, #2563eb 40%, #38bdf8 100%)"}
         onMouseOut={e => e.currentTarget.style.background = "linear-gradient(90deg, #38bdf8 60%, #22d3ee 100%)"}
       >
@@ -966,7 +1133,7 @@ useEffect(() => {
             >
               <input
                 type="text"
-                placeholder="Pergunte ao agente…"
+                placeholder=" Peça Resumo de conversas ao agente…"
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 style={{

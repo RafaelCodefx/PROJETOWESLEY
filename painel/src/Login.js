@@ -1,5 +1,7 @@
 // Login.js
 import 'bootstrap/dist/css/bootstrap.min.css';
+import './Login.css'
+import eva from './assets/eva.png'
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { jwtDecode } from 'jwt-decode';
@@ -70,12 +72,18 @@ function Login() {
             style={{ width: isMobile ? '90px' : '150px', borderRadius: '8px' }}
           />
         </div>
-        <p
-          className="text-center text-secondary mb-4"
-          style={{ fontFamily: 'Roboto, sans-serif', fontSize: isMobile ? '14px' : '15px' }}
-        >
-          Que bom ter você de volta! Nosso agente de IA está pronto pra turbinar suas conversas no WhatsApp!
-        </p>
+        <div className="d-flex flex-column align-items-center mb-3">
+      <img
+        src={eva}
+        alt="Assistente Virtual Eva"
+        className="eva-avatar"
+      />
+      <p className="eva-frase">
+      “Sou a EVA. Inteligente, adaptável e pronta para atender do seu jeito. Configure-me como quiser.” 🤖✨
+    </p>
+
+</div>
+
 
         <input
           type="text"
@@ -129,5 +137,7 @@ function Login() {
     </div>
   );
 }
+
+
 
 export default Login;

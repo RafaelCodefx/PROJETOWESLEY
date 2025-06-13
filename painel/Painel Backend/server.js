@@ -3,6 +3,11 @@
  */
 
 require('dotenv').config();
+
+const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
+const { OpenAI } = require("openai");
 const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
@@ -267,6 +272,81 @@ app.get('/api/google/get-auth-url', auth, async (req, res) => {
     return res.status(500).json({ ok: false, msg: 'Não foi possível gerar Auth URL.' });
   }
 });
+
+const nodemailer = require('nodemailer');
+
+app.post('/api/esqueci-senha', async (req, res) => {
+  const { email } = req.body;
+  console.log('🔥 Rota /api/esqueci-senha acessada com:', req.body);
+
+  try {
+    const user = await Usuario.findOne({ email });
+    console.log('🔍 Resultado do MongoDB:', user);
+
+    if (!user) {
+      console.log('⚠️ Usuário não encontrado.');
+      return res.json({ msg: 'Se este e-mail existir, você receberá as instruções em instantes.' });
+    }
+
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET, { expiresIn: '30m' });
+    console.log('🔐 Token JWT gerado:', token);
+
+    const link = `${process.env.FRONTEND_URL}/resetar-senha/${token}`;
+    console.log('🔗 Link de recuperação:', link);
+
+    const transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_PASS
+      }
+    });
+
+    console.log('📤 Enviando e-mail...');
+
+    const info = await transporter.sendMail({
+      from: `"EVA Supernova" <${process.env.EMAIL_USER}>`,
+      to: email,
+      subject: 'Recuperação de senha – EVA',
+      html: `
+        <h2>Olá!</h2>
+        <p>Você solicitou a recuperação da sua senha. Clique no botão abaixo para redefinir:</p>
+        <a href="${link}" style="padding: 10px 15px; background: #007bff; color: white; text-decoration: none; border-radius: 6px;">Redefinir senha</a>
+        <p>Este link expira em 30 minutos.</p>
+      `
+    });
+
+    console.log('✅ E-mail enviado:', info.messageId);
+    res.json({ msg: 'Se este e-mail existir, você receberá as instruções em instantes.' });
+
+  } catch (err) {
+    console.error('❌ Erro no processo de recuperação:', err.message || err);
+    res.status(500).json({ msg: 'Erro interno ao tentar enviar o e-mail.' });
+  }
+});
+
+    
+
+app.post('/api/resetar-senha/:token', async (req, res) => {
+  const { token } = req.params;
+  const { novaSenha } = req.body;
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const user = await Usuario.findById(decoded.id);
+    if (!user) return res.status(404).json({ msg: 'Usuário não encontrado' });
+
+    const hash = await bcrypt.hash(novaSenha, 12);
+    user.senha = hash;
+    await user.save();
+
+    return res.json({ ok: true, msg: 'Senha redefinida com sucesso!' });
+  } catch (err) {
+    return res.status(400).json({ ok: false, msg: 'Token inválido ou expirado' });
+  }
+});
+
+
 
 
 app.get('/api/horarios-disponiveis', auth, async (req, res) => {
@@ -708,6 +788,84 @@ app.get('/api/horarios-disponiveis-por-dia', auth, async (req, res) => {
       msg: 'Erro ao buscar horários disponíveis.',
       detalhes: err.message || err,
     });
+  }
+});
+
+
+const upload = multer({ dest: "uploads/" });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_KEY });
+
+app.post("/api/formatarconh", upload.single("arquivo"), async (req, res) => {
+  const token = req.headers.authorization?.replace("Bearer ", "");
+  console.log(token)
+  if (!token) return res.status(401).json({ msg: "Token ausente" });
+
+  let nomeUsuario;
+  try {
+    const payload = jwt.verify(token, process.env.JWT_SECRET);
+    nomeUsuario = payload.nome || "desconhecido";
+    console.log(nomeUsuario)
+  } catch {
+    return res.status(401).json({ msg: "Token inválido" });
+  }
+
+  if (!req.file) return res.status(400).json({ msg: "Arquivo ausente" });
+
+  const caminhoTemporario = req.file.path;
+  const textoOriginal = fs.readFileSync(caminhoTemporario, "utf8");
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4-turbo",
+      messages: [
+        {
+          role: "system",
+          content: `Você é um assistente especializado em construir bases de conhecimento para sistemas RAG (Retrieval-Augmented Generation). Sua tarefa é transformar um texto fornecido em formato CSV, no seguinte padrão:
+
+          pergunta,resposta  
+          Oi,"Olá, como posso ajudar?"  
+          Qual o valor da sessão?,"O valor da sessão individual on-line é de R$300,00."  
+          ...
+          
+          ⚠️ Regras obrigatórias:
+          
+          1. Cada linha deve conter **exatamente uma pergunta e uma resposta**.  
+          2. A **pergunta** nunca deve estar entre aspas.  
+          3. A **resposta** deve estar sempre entre **aspas duplas**.  
+          4. Remova quebras de linha internas e pontuações desnecessárias nas respostas.  
+          5. A primeira linha do CSV deve ser: **pergunta,resposta** (exatamente assim, tudo em minúsculo).
+          
+          📌 Se o conteúdo enviado **não estiver no formato de perguntas e respostas**, analise o contexto e:
+          
+          - Converta explicações em perguntas e respostas coerentes.
+          - Reescreva como se fosse um diálogo natural entre cliente e atendente.
+          
+          📌 NÃO retorne comentários, explicações ou qualquer outro texto além do CSV.
+          
+          Retorne SOMENTE o conteúdo CSV, corretamente formatado.
+          `          
+        },
+        
+        {
+          role: "user",
+          content: textoOriginal
+        }
+      ],
+      temperature: 0.3
+    });
+
+    const csvFormatado = completion.choices[0].message.content;
+
+    const nomeArquivo = `base_form_${nomeUsuario}.csv`;
+    const caminhoFinal = path.join(__dirname, "../../AgenteLLM", nomeArquivo);
+
+    fs.writeFileSync(caminhoFinal, csvFormatado);
+    fs.unlinkSync(caminhoTemporario); // limpa o arquivo .txt enviado
+
+    res.json({ ok: true, msg: "Base salva com sucesso", nomeArquivo });
+  } catch (err) {
+    console.error("[/api/formatarconh]", err);
+    res.status(500).json({ ok: false, msg: "Erro ao formatar base" });
   }
 });
 

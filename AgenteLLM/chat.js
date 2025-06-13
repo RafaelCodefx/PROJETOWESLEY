@@ -67,7 +67,7 @@ app.post("/api/webhook", async (req, res) => {
       console.log("🔍 Intenção detectada:", resultado);
   
       if (!resultado.startsWith("RESUMO:")) {
-        return res.json({ answer: "❌ No momento, só posso gerar resumos. Outras funções em breve." });
+        return res.json({ answer: "❌ No momento, só posso gerar resumos. Ainda estou aprendendo usar novas funções aqui." });
       }
   
       const nomeCliente = resultado.replace("RESUMO:", "").trim();
@@ -101,6 +101,7 @@ app.post("/api/webhook", async (req, res) => {
   });
   
   
+
 
 const PORT = process.env.PORT || 8003;
 app.listen(PORT, () => {

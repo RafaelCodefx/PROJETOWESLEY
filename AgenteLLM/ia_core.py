@@ -27,7 +27,7 @@ from datetime import date
 # Cache simples em memória
 numeros_registrados: dict[str, str] = {}
 
-
+agora = datetime.now()
 def tempo(dia: int, mes: int) -> str:
     hoje = date.today()
     print(hoje)
@@ -72,10 +72,39 @@ load_dotenv()
 elevenlabs = ElevenLabs(api_key=os.getenv("ELEVENLABS_API_KEY"))
 
 # ─── 1) Carregar base de conhecimento e vetorizar ──────────────────────────────
-loader = CSVLoader(file_path="base_conhecimento.csv")
-documents = loader.load()
-embeddings = OpenAIEmbeddings()
-db = FAISS.from_documents(documents, embeddings)
+    # loader = CSVLoader(file_path=f"base_form{nome_admin}.csv"
+    # documents = loader.load()
+    # embeddings = OpenAIEmbeddings() 
+    # db = FAISS.from_documents(documents, embeddings)
+
+
+
+# ─── 1) Carregar base de conhecimento e vetorizar ──────────────────────────────
+JWT_SECRET = os.getenv("JWT_SECRET")
+print("JWT_SECRET:", repr(JWT_SECRET))
+
+def extrair_nome_admin(token_jwt: str) -> str:
+    import jwt
+    payload = jwt.decode(token_jwt, JWT_SECRET, algorithms=["HS256"])
+    return payload.get("nome")
+
+def carregar_base_conhecimento(token_jwt: str):
+    nome_admin = extrair_nome_admin(token_jwt)
+    nome_formatado = nome_admin.lower().strip().replace(" ", "_").replace("+", "").replace("-", "")
+    caminho_arquivo = f"./base_form_{nome_admin}.csv"
+
+    if not os.path.exists(caminho_arquivo):
+        raise FileNotFoundError(f"❌ Arquivo não encontrado para o admin: {nome_admin} em {caminho_arquivo}")
+
+    print(f"📂 Base de conhecimento carregada: {caminho_arquivo}")
+    loader = CSVLoader(file_path=caminho_arquivo)
+    documents = loader.load()
+
+    embeddings = OpenAIEmbeddings()
+    db = FAISS.from_documents(documents, embeddings)
+    return db
+
+
 
 # ─── 2) Memória em RAM por usuário ─────────────────────────────────────────────
 memorias_usuarios: Dict[str, ConversationBufferMemory] = {}
@@ -142,6 +171,7 @@ def responder_duvida_rag(user_message, prompt_fluxo, db, openai_key, memoria=Non
             "Resposta direta e gentil:"
         )
     )
+    
     qa_chain = ConversationalRetrievalChain.from_llm(
         llm=llm,
         retriever=db.as_retriever(),
@@ -1029,7 +1059,7 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
  
     if estado_atual == COLETANDO_NOME:
         nome_informado = user_message.strip()
-        
+        db = carregar_base_conhecimento(token_jwt)
         if is_question(nome_informado):
             texto_fluxo = "😊 Agora, para continuar a emissão do boleto, poderia me informar seu **nome completo**?"
             return {
@@ -1072,6 +1102,7 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
 
     # Se estivermos aguardando o CPF/CNPJ:
     if estado_atual == COLETANDO_CPF:
+        db = carregar_base_conhecimento(token_jwt)
         msg = user_message.strip()
         if is_question(msg):
             texto_fluxo = (
@@ -1145,9 +1176,27 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
         customerId_por_usuario[numero_telefone] = novo_customer_id
         dados_cliente_temp.pop(numero_telefone, None)
         estado_por_usuario[numero_telefone] = "INICIAL"
+        asaasToken = get_user_config(token_jwt).get("asaasKey")
+        link = gerar_cobranca_asaas_sandbox(
+                customerId_por_usuario[numero_telefone], 300.0, asaasToken
+                )
+        if link:
+            texto = f" Aqui está seu link de pagamento 💳: {link}"
+            return {
+                "response": texto,
+                "audio_path": None,
+                "slots": []
+            }
+        else:
+            texto = " Mas não consegui gerar o boleto. 😕"
+            return{
+            "response": texto,
+            "audio_path": None,
+            "slots": []
+            }
 
         return {
-            "response": f"✅ Cliente cadastrado com sucesso! ID: {novo_customer_id}. Agora posso gerar seu boleto quando você pedir.",
+            "response": f"✅ Cliente cadastrado com sucesso! ID: {novo_customer_id}.",
             "audio_path": None,
             "slots": []
         }
@@ -1185,9 +1234,10 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
         # Salvamos em memória (ou no banco) esse customerId para futuras cobranças
         customerId_por_usuario[numero_telefone] = novo_customer_id
         dados_cliente_temp.pop(numero_telefone, None)
+
         estado_por_usuario[numero_telefone] = "INICIAL"
 
-        return {"response": f"✅ Cliente cadastrado com sucesso! ID: {novo_customer_id}. Agora posso gerar seu boleto quando você pedir.", "audio_path": None, "slots": []}
+        return {"response": f"✅ Cliente cadastrado com sucesso! ID: {novo_customer_id}.", "audio_path": None, "slots": []}
 
 
 
@@ -2092,7 +2142,7 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
             ]
 
             if len(friendly) == 1:
-                texto = f"👍 Só tenho {friendly[0]} nessa data. Esse horário serve?"
+                texto = f" Só tenho {friendly[0]} nessa data. Esse horário serve? ✨"
                 estado_por_usuario[numero_telefone] = "AGUARDANDO_CONFIRMACAO_UNICO_HORARIO"
                 cache_horarios_por_usuario[numero_telefone] = [{
                     "id": selecionados[0]["id"],
@@ -2100,7 +2150,7 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
                 }]
             else:
                 lista_amig = " ou ".join(friendly)
-                texto = f"📅 Posso agendar em {lista_amig}. Qual funciona melhor?"
+                texto = f"📅 Posso agendar em {lista_amig}. Qual funciona melhor? ✨💕"
                 estado_por_usuario[numero_telefone] = "AGUARDANDO_ESCOLHA_HORARIO_HUMANO"
                 cache_horarios_por_usuario[numero_telefone] = [
                     {"id": h["id"], "inicio": h["inicio"]} for h in selecionados
@@ -2310,13 +2360,13 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
                 "{chat_history}\n\n"
                 "Contexto relevante extraído (se houver):\n"
                 "{context}\n\n"
-                "Horário e dia atual: {agora}"
+                f"Horário e dia atual: {agora}"
                 "A mensagem atual do cliente:\n"
                 "{question}\n\n"
                 "Responda de forma humana e natural 😊"
             )
         )
-
+        db = carregar_base_conhecimento(token_jwt)
         qa_chain = ConversationalRetrievalChain.from_llm(
             llm=llm,
             retriever=db.as_retriever(),
@@ -2328,6 +2378,7 @@ def generate_response(numero_telefone: str, user_message: str, token_jwt: str) -
         )
         try:
             resposta_texto = qa_chain.invoke({"question": user_message})["answer"]
+            
         except Exception as e:
             print(f"[⚠️] Erro interno no LLM: {e}")
             resposta_texto = "😔 Tive um problema ao processar sua mensagem. Pode tentar novamente?"
@@ -2561,7 +2612,7 @@ Agora responda à pergunta abaixo de forma clara e direta (em português). Se a 
 Pergunta: {question}
 """
     )
-
+    db = carregar_base_conhecimento(token_jwt)
     # — Cria o ConversationalRetrievalChain
     chain = ConversationalRetrievalChain.from_llm(
         llm=get_llm(get_user_config(token_jwt).get("openaiKey") or os.getenv("OPENAI_API_KEY")),
@@ -2586,8 +2637,13 @@ class TokenPayload_(BaseModel):
     numero: str
     token: str
 
+from fastapi.security import HTTPBearer 
+from fastapi.security import HTTPAuthorizationCredentials
 
+
+security = HTTPBearer()
 def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    
     try:
         payload = jwt.decode(credentials.credentials, os.getenv("JWT_SECRET"), algorithms=["HS256"])
         return payload
@@ -2597,6 +2653,7 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
 
 @app.get("/chat/{user_id}")
 def gerar_resumo_por_nome(user_id: str, nome: str, current_user: dict = Depends(get_current_user)):
+    
     if not nome:
         raise HTTPException(status_code=400, detail="Nome ausente")
 
@@ -2637,6 +2694,7 @@ def gerar_resumo_por_nome(user_id: str, nome: str, current_user: dict = Depends(
 def rota_user_id(info: tuple[str, str] = Depends(decode_token_completo)):
     numero, token_jwt = info
     user_id = get_user_id_por_numero(numero, token_jwt)
+    db = carregar_base_conhecimento(token_jwt)
     if user_id:
         return {"userId": user_id}
     return {"erro": "Usuário não encontrado"}
@@ -2647,6 +2705,7 @@ async def generate(
     req: MessageRequest,
     authorization: str = Header(None)
 ):
+    
     if not authorization:
         raise HTTPException(status_code=401, detail="Token JWT ausente no header Authorization")
     token_jwt = authorization.replace("Bearer ", "")
@@ -2655,9 +2714,10 @@ async def generate(
     numero_meu = req.numeroConectado
     print(numero_meu)
     user_message = req.message
+    
 
     openai_key = get_user_config(token_jwt).get("openaiKey") or os.environ.get("OPENAI_API_KEY")
-
+    db = carregar_base_conhecimento(token_jwt)
     # Salvar mensagem do usuário na memória
     ext = extract_name_and_phone_llm(user_message,  openai_key or os.environ.get("OPENAI_API_KEY"))
     numero_telefone = req.sender

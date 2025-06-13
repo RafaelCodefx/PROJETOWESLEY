@@ -1,5 +1,6 @@
 //app.js
 import React from 'react';
+import ResetarSenha from './ResetarSenha'; // adicione isso no topo
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import Login from './Login';
 import EsqueciSenha from './EsqueciSenha';
@@ -14,6 +15,7 @@ function App() {
         <Route path="/" element={<Login />} />
         <Route path="/esqueci-senha" element={<EsqueciSenha />} />
         <Route path="/cadastro" element={<Cadastro />} />
+        <Route path="/resetar-senha/:token" element={<ResetarSenha />} />
 
         {/* Tudo que estiver dentro do ProtectedRoute só acessa se estiver logado */}
         <Route element={<ProtectedRoute />}>
